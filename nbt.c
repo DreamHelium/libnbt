@@ -406,10 +406,12 @@ int LIBNBT_parse_value(NBT* saveto, NBT_Buffer* buffer, uint8_t skipkey) {
                 if (i == 0) {
                     last = child;
                     saveto->child = child;
+                    saveto->child->parent = saveto;
                 } else {
                     last->next = child;
                     child->prev = last;
                     last = child;
+                    child->parent = saveto;
                 }
             }
             break;
@@ -431,11 +433,13 @@ int LIBNBT_parse_value(NBT* saveto, NBT_Buffer* buffer, uint8_t skipkey) {
                 }
                 if (last == NULL) {
                     saveto->child = child;
+                    saveto->child->parent = saveto;
                     last = child;
                 } else {
                     last->next = child;
                     child->prev = last;
                     last = child;
+                    child->parent = saveto;
                 }
             }
             break;

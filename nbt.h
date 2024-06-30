@@ -79,6 +79,7 @@ typedef struct NBT {
     // if this NBT tag is inside a list or compound, these two links are used to denote its siblings
     struct NBT *next;
     struct NBT *prev;
+    struct NBT *parent;
 } NBT;
 
 typedef struct MCA {
