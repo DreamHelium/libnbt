@@ -1282,8 +1282,9 @@ int NBT_Pack_Opt(NBT* root, uint8_t* buffer, size_t* length, NBT_Compression com
     if (compression == NBT_Compression_NONE) {
         buf = LIBNBT_init_buffer(buffer, *length);
     } else {
-        uint8_t* tempbuf = malloc(1 << 20);
-        buf = LIBNBT_init_buffer(tempbuf, 1 << 20);
+        size_t len = *length > (1 << 20) ? *length : (1 << 20);
+        uint8_t* tempbuf = malloc(len);
+        buf = LIBNBT_init_buffer(tempbuf, len);
     }
     int ret;
     ret = LIBNBT_nbt_write_nbt(buf, root, 1);
@@ -1295,6 +1296,7 @@ int NBT_Pack_Opt(NBT* root, uint8_t* buffer, size_t* length, NBT_Compression com
         return ret;
     } else {
         if (ret != 0) {
+            free(buf->data);
             free(buf);
             return ret;
         }
