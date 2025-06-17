@@ -135,6 +135,14 @@ NBT* LIBNBT_create_NBT(uint8_t type) {
     return root;
 }
 
+static NbtNode* create_nbt(NBT_Tags tag)
+{
+    NbtData* data = g_new0(NbtData, 1);
+    data->type = tag;
+    NbtNode* root = g_node_new(data);
+    return root;
+}
+
 NBT_Buffer* LIBNBT_init_buffer(uint8_t* data, int length) {
     NBT_Buffer* buffer = malloc(sizeof(NBT_Buffer));
     if (buffer == NULL) {
@@ -280,6 +288,189 @@ int LIBNBT_getKey(NBT_Buffer* buffer, char** result) {
     return 2 + len;
 }
 
+static int parse_value(NbtNode* node, NBT_Buffer* buffer, uint8_t skipkey)
+{
+    if (!node || !buffer || !buffer->data)
+        return LIBNBT_ERROR_INTERNAL;
+
+    NbtData* data = node->data;
+    NBT_Tags tag = data->type;
+    if (tag == TAG_End)
+        {
+            if (!LIBNBT_getUint8(buffer, &tag))
+                return LIBNBT_ERROR_EARLY_EOF;
+            if (!isValidTag(tag))
+                return LIBNBT_ERROR_INVALID_DATA;
+            data->type = tag;
+        }
+
+    if (!skipkey)
+        {
+            char* key = NULL;
+            if (!LIBNBT_getKey(buffer, &key))
+                return LIBNBT_ERROR_EARLY_EOF;;
+            data->key = key;
+        }
+
+    switch (tag)
+        {
+        case TAG_Byte:
+            {
+                uint8_t value;
+                if (!LIBNBT_getUint8(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_i = value;
+                break;
+            }
+            case TAG_Short:
+            {
+                uint16_t value;
+                if (!LIBNBT_getUint16(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_i = value;
+                break;
+            }
+            case TAG_Int:
+            {
+                uint32_t value;
+                if (!LIBNBT_getUint32(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_i = value;
+                break;
+            }
+            case TAG_Long:
+            {
+                uint64_t value;
+                if (!LIBNBT_getUint64(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_i = value;
+                break;
+            }
+            case TAG_Float:
+            {
+                float value;
+                if (!LIBNBT_getFloat(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_d = value;
+                break;
+            }
+            case TAG_Double:
+            {
+                double value;
+                if (!LIBNBT_getDouble(buffer, &value))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_d = value;
+                break;
+            }
+            case TAG_Byte_Array:
+            {
+                uint32_t len;
+                if (!LIBNBT_getUint32(buffer, &len))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.len = len;
+                if (buffer->pos + len > buffer->len)
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.value = g_new0(uint8_t, len);
+                memcpy(data->value_a.value, buffer->data + buffer->pos, len);
+                buffer->pos += len;
+                break;
+            }
+        case TAG_String:
+            {
+                uint16_t len;
+                if (!LIBNBT_getUint16(buffer, &len))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.len = len + 1;
+                if (buffer->pos + len > buffer->len)
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.value = g_new0(uint8_t, len + 1);
+                memcpy(data->value_a.value, buffer->data + buffer->pos, len);
+                char* value = data->value_a.value;
+                value[len] = 0;
+                buffer->pos += len;
+                break;
+            }
+        case TAG_List:
+            {
+                uint8_t list_type;
+                if (!LIBNBT_getUint8(buffer, &list_type))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                uint32_t len;
+                if (!LIBNBT_getUint32(buffer, &len))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                if (list_type == TAG_End && len != 0)
+                    return LIBNBT_ERROR_INVALID_DATA;
+                NbtNode* last = NULL;
+                for (int i = 0 ; i < len; i++)
+                    {
+                        NbtNode* child = create_nbt (list_type);
+                        int ret = parse_value(child, buffer, 1);
+                        if (ret) return ret;
+                        g_node_insert_after(node, last, child);
+                        last = child;
+                    }
+                break;
+            }
+        case TAG_Compound:
+            {
+                NbtNode* last = NULL;
+                while (1)
+                    {
+                        uint8_t list_type;
+                        if (!LIBNBT_getUint8(buffer, &list_type))
+                            return LIBNBT_ERROR_EARLY_EOF;
+                        if (list_type == 0)
+                            break;
+                        NbtNode* child = create_nbt (list_type);
+                        int ret = parse_value(child, buffer, 0);
+                        if (ret) return ret;
+                        g_node_insert_after(node, last, child);
+                        last = child;
+                    }
+                break;
+            }
+            case TAG_Int_Array:
+            {
+                uint32_t len;
+                if (!LIBNBT_getUint32(buffer, &len))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.len = len;
+                if (buffer->pos + len * 4 > buffer->len)
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.value = g_new0(uint32_t, len);
+                memcpy(data->value_a.value, buffer->data + buffer->pos, len * 4);
+                buffer->pos += (len * 4);
+                int i;
+                uint32_t* value = data->value_a.value;
+                for (i = 0; i < len; i ++) {
+                        value[i] = bswap_32(value[i]);
+                }
+                break;
+            }
+            case TAG_Long_Array:
+            {
+                uint32_t len;
+                if (!LIBNBT_getUint32(buffer, &len))
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.len = len;
+                if (buffer->pos + len * 8 > buffer->len)
+                    return LIBNBT_ERROR_EARLY_EOF;
+                data->value_a.value = g_new0(uint64_t, len);
+                memcpy(data->value_a.value, buffer->data + buffer->pos, len * 8);
+                buffer->pos += (len * 8);
+                int i;
+                uint64_t* value = data->value_a.value;
+                for (i = 0; i < len; i ++) {
+                        value[i] = bswap_64(value[i]);
+                }
+                break;
+            }
+        default:
+            return LIBNBT_ERROR_INTERNAL;
+        }
+    return 0;
+}
+
 int LIBNBT_parse_value(NBT* saveto, NBT_Buffer* buffer, uint8_t skipkey) {
     
     if (saveto == NULL || buffer == NULL || buffer->data == NULL) {
@@ -406,12 +597,12 @@ int LIBNBT_parse_value(NBT* saveto, NBT_Buffer* buffer, uint8_t skipkey) {
                 if (i == 0) {
                     last = child;
                     saveto->child = child;
-                    saveto->child->parent = saveto;
+                    // saveto->child->parent = saveto;
                 } else {
                     last->next = child;
                     child->prev = last;
                     last = child;
-                    child->parent = saveto;
+                    // child->parent = saveto;
                 }
             }
             break;
@@ -433,13 +624,13 @@ int LIBNBT_parse_value(NBT* saveto, NBT_Buffer* buffer, uint8_t skipkey) {
                 }
                 if (last == NULL) {
                     saveto->child = child;
-                    saveto->child->parent = saveto;
+                    // saveto->child->parent = saveto;
                     last = child;
                 } else {
                     last->next = child;
                     child->prev = last;
                     last = child;
-                    child->parent = saveto;
+                    // child->parent = saveto;
                 }
             }
             break;
@@ -1021,8 +1212,97 @@ NBT* NBT_Parse_Opt(uint8_t* data, size_t length, NBT_Error* errid) {
     }
 }
 
+NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* errid)
+{
+    NBT_Buffer* buffer;
+
+    /* Unzip data */
+    if (length > 1 && data[0] == 0x1f && data[1] == 0x8b) {
+            // file is gzip
+            size_t size;
+            uint8_t* undata;
+            int ret = LIBNBT_decompress_gzip(&undata, &size, data, length);
+            if (ret != 0) {
+                    LIBNBT_fill_err(errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
+                    return NULL;
+            }
+            buffer = LIBNBT_init_buffer(undata, size);
+    } else if (data[0] == 0x78) {
+            // file is zlib
+            size_t size;
+            uint8_t* undata;
+            int ret = LIBNBT_decompress_zlib(&undata, &size, data, length);
+            if (ret != 0) {
+                    LIBNBT_fill_err(errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
+                    return NULL;
+            }
+            buffer = LIBNBT_init_buffer(undata, size);
+    } else {
+            buffer = LIBNBT_init_buffer(data, length);
+    }
+
+    NbtNode* root = create_nbt(TAG_End);
+    int ret = parse_value(root, buffer, 0);
+    if (buffer->data != data) {
+            free(buffer->data);
+    }
+
+    if (ret != 0) {
+            LIBNBT_fill_err(errid, ret, buffer->pos);
+            g_node_destroy(root);
+            free(buffer);
+            return NULL;
+    } else {
+            if (buffer->pos != buffer->len) {
+                    LIBNBT_fill_err(errid, LIBNBT_ERROR_LEFTOVER_DATA, buffer->pos);
+            } else {
+                    LIBNBT_fill_err(errid, 0, buffer->pos);
+            }
+            free(buffer);
+            return root;
+    }
+}
+
 NBT* NBT_Parse(uint8_t* data, size_t length) {
     return NBT_Parse_Opt(data, length, NULL);
+}
+
+NbtNode* nbt_node_new(uint8_t* data, size_t length)
+{
+    return nbt_node_new_opt(data, length, NULL);
+}
+
+static void nbt_data_free(NbtNode* node)
+{
+    NbtData* data = node->data;
+    if (!data->key)
+        free(data->key);
+    switch (data->type) {
+        case TAG_Byte_Array:
+        case TAG_Long_Array:
+        case TAG_Int_Array:
+        case TAG_String:
+            if (data->value_a.value != NULL) {
+                    free(data->value_a.value);
+            }
+            break;
+        default: break;
+    }
+    g_free(data);
+}
+
+void nbt_node_free(NbtNode* node)
+{
+    while (node)
+        {
+            GNode *next = node->next;
+            if (node->children)
+                nbt_node_free (node->children);
+            nbt_data_free(node);
+            g_slice_free (GNode, node);
+            node = next;
+        }
+
 }
 
 void NBT_Free(NBT* root) {

@@ -15,16 +15,18 @@
     along with this program.  If not, see <https://www.gnu.org/licenses/>. */
 
 
-#pragma once
-#include <stdio.h>
+#ifndef NBT_H
+#define NBT_H
+#include <glib.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // enumerations for available NBT tags
-// refer to https://minecraft.gamepedia.com/NBT_format
+// refer to https://minecraft.wiki/w/NBT_format
 typedef enum NBT_Tags {
     TAG_End, TAG_Byte, TAG_Short, TAG_Int, TAG_Long, TAG_Float, TAG_Double, TAG_Byte_Array, TAG_String, TAG_List, TAG_Compound, TAG_Int_Array, TAG_Long_Array
 } NBT_Tags;
@@ -46,6 +48,37 @@ typedef enum NBT_Compression {
 
 // There's always 1024 (32*32) chunks in a region file
 #define CHUNKS_IN_REGION 1024
+
+typedef struct NbtData
+{
+    // NBT tag. see the enum above
+    enum NBT_Tags type;
+
+    // NBT tag name. Nullable when no name defined. '\0' ended
+    char* key;
+
+    // NBT tag data.
+    union {
+
+        // numerical data, used when tag=[TAG_Byte, TAG_Short, TAG_Int, TAG_Long]
+        int64_t value_i;
+
+        // used when tag=[TAG_Float, TAG_Double]
+        double value_d;
+
+        // Array data, used when tag=[TAG_Byte_Array, TAG_Int_Array, TAG_Long_Array, TAG_String]
+        // Note: when using TAG_String, value_a.len equals 1 + string length, because of the ending '\0'
+        struct {
+            void* value;
+            int32_t len;
+        }value_a;
+
+        // pointer to child. used when tag=[TAG_Compound, TAG_List]
+        struct NBT *child;
+    };
+}NbtData;
+
+    typedef GNode NbtNode;
 
 // NBT data structure
 typedef struct NBT {
@@ -104,6 +137,9 @@ typedef struct NBT_Error {
     int position;
 } NBT_Error;
 
+    NbtNode* nbt_node_new(uint8_t* data, size_t length);
+    NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* err);
+    void nbt_node_free(NbtNode* node);
 NBT*  NBT_Parse(uint8_t* data, size_t length);
 NBT*  NBT_Parse_Opt(uint8_t* data, size_t length, NBT_Error* err);
 void  NBT_Free(NBT* root);
@@ -123,4 +159,6 @@ void  MCA_Free(MCA* mca);
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif
