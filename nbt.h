@@ -72,9 +72,6 @@ typedef struct NbtData
             void* value;
             int32_t len;
         }value_a;
-
-        // pointer to child. used when tag=[TAG_Compound, TAG_List]
-        struct NBT *child;
     };
 }NbtData;
 

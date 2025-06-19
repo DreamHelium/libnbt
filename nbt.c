@@ -410,8 +410,7 @@ static int parse_value(NbtNode* node, NBT_Buffer* buffer, uint8_t skipkey)
                         NbtNode* child = create_nbt (list_type);
                         int ret = parse_value(child, buffer, 1);
                         if (ret) return ret;
-                        g_node_insert_after(node, last, child);
-                        last = child;
+                        last = g_node_insert_after(node, last, child);
                     }
                 break;
             }
@@ -428,8 +427,7 @@ static int parse_value(NbtNode* node, NBT_Buffer* buffer, uint8_t skipkey)
                         NbtNode* child = create_nbt (list_type);
                         int ret = parse_value(child, buffer, 0);
                         if (ret) return ret;
-                        g_node_insert_after(node, last, child);
-                        last = child;
+                        last = g_node_insert_after(node, last, child);
                     }
                 break;
             }
@@ -443,7 +441,7 @@ static int parse_value(NbtNode* node, NBT_Buffer* buffer, uint8_t skipkey)
                     return LIBNBT_ERROR_EARLY_EOF;
                 data->value_a.value = g_new0(uint32_t, len);
                 memcpy(data->value_a.value, buffer->data + buffer->pos, len * 4);
-                buffer->pos += (len * 4);
+                buffer->pos += len * 4;
                 int i;
                 uint32_t* value = data->value_a.value;
                 for (i = 0; i < len; i ++) {
@@ -461,7 +459,7 @@ static int parse_value(NbtNode* node, NBT_Buffer* buffer, uint8_t skipkey)
                     return LIBNBT_ERROR_EARLY_EOF;
                 data->value_a.value = g_new0(uint64_t, len);
                 memcpy(data->value_a.value, buffer->data + buffer->pos, len * 8);
-                buffer->pos += (len * 8);
+                buffer->pos += len * 8;
                 int i;
                 uint64_t* value = data->value_a.value;
                 for (i = 0; i < len; i ++) {
