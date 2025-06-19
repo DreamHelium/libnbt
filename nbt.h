@@ -137,9 +137,11 @@ typedef struct NBT_Error {
     int position;
 } NBT_Error;
 
-    NbtNode* nbt_node_new(uint8_t* data, size_t length);
-    NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* err);
-    void nbt_node_free(NbtNode* node);
+NbtNode* nbt_node_new(uint8_t* data, size_t length);
+NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* err);
+void nbt_node_free(NbtNode* node);
+int nbt_node_pack(NbtNode* node, uint8_t* buffer, size_t* length);
+int nbt_node_pack_opt(NbtNode* node, uint8_t* buffer, size_t* length, NBT_Compression compression, NBT_Error* err);
 NBT*  NBT_Parse(uint8_t* data, size_t length);
 NBT*  NBT_Parse_Opt(uint8_t* data, size_t length, NBT_Error* err);
 void  NBT_Free(NBT* root);

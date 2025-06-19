@@ -128,6 +128,10 @@ int LIBNBT_nbt_write_compound(NBT_Buffer* buffer, NBT* root);
 int LIBNBT_nbt_write_list(NBT_Buffer* buffer, NBT* root);
 void LIBNBT_fill_err(NBT_Error* err, int errid, int position);
 
+static int nbt_node_write_nbt(NBT_Buffer* buffer, NbtNode* node, int writekey);
+static int nbt_node_write_list(NBT_Buffer* buffer, NbtNode* node);
+static int nbt_node_write_compound(NBT_Buffer* buffer, NbtNode* node);
+
 NBT* LIBNBT_create_NBT(uint8_t type) {
     NBT* root = malloc(sizeof(NBT));
     memset(root, 0, sizeof(NBT));
@@ -1458,6 +1462,62 @@ int LIBNBT_nbt_write_string(NBT_Buffer* buffer, void* value, int32_t len, char* 
     return 0;
 }
 
+static int nbt_node_write_nbt(NBT_Buffer* buffer, NbtNode* node, int writekey)
+{
+    int ret = 0;
+    NbtData* data = node->data;
+    if (writekey)
+        {
+            ret = LIBNBT_nbt_write_key(buffer, data->key, data->type);
+        }
+    if (ret) return ret;
+
+    switch (data->type)
+        {
+        case TAG_Byte:
+        case TAG_Short:
+        case TAG_Int:
+        case TAG_Long:
+            ret = LIBNBT_nbt_write_number(buffer, data->value_i, data->key, data->type);
+            return ret;
+        case TAG_Float:
+        case TAG_Double:
+            ret = LIBNBT_nbt_write_point(buffer, data->value_d, data->key, data->type);
+            return ret;
+        case TAG_Byte_Array:
+        case TAG_Int_Array:
+        case TAG_Long_Array:
+            ret = LIBNBT_nbt_write_array(buffer, data->value_a.value, data->value_a.len, data->key, data->type);
+            return ret;
+        case TAG_String:
+            ret = LIBNBT_nbt_write_string(buffer, data->value_a.value, data->value_a.len, data->key);
+            return ret;
+        case TAG_List:
+            ret = nbt_node_write_list(buffer, node);
+            return ret;
+        case TAG_Compound:
+            ret = nbt_node_write_compound(buffer, node);
+            return ret;
+        default:
+            return LIBNBT_ERROR_INTERNAL;
+        }
+}
+
+static int nbt_node_write_compound(NBT_Buffer* buffer, NbtNode* node)
+{
+    int ret = 0;
+    NbtNode* child = node->children;
+    while (child)
+        {
+            ret = nbt_node_write_nbt(buffer, child, 1);
+            if (ret) return ret;
+            child = child->next;
+        }
+    ret = LIBNBT_writeUint8(buffer, 0);
+    if (!ret) return LIBNBT_ERROR_BUFFER_OVERFLOW;
+    return 0;
+}
+
 int LIBNBT_nbt_write_compound(NBT_Buffer* buffer, NBT* root) {
     int ret;
     NBT* child = root->child;
@@ -1476,6 +1536,35 @@ int LIBNBT_nbt_write_compound(NBT_Buffer* buffer, NBT* root) {
     return 0;
 }
 
+static int nbt_node_write_list(NBT_Buffer* buffer, NbtNode* node)
+{
+    int ret = 0;
+    NbtNode* child = node->children;
+    int count = 0;
+    while (child)
+        {
+            count++;
+            child = child->next;
+        }
+    child = node->children;
+    if (!child)
+            ret = LIBNBT_writeUint8(buffer, 0);
+    else
+        {
+            NbtData* child_data = child->data;
+            ret = LIBNBT_writeUint8(buffer, child_data->type);
+        }
+    ret = LIBNBT_writeUint32(buffer, count);
+    if (!ret) return LIBNBT_ERROR_BUFFER_OVERFLOW;
+    while (child)
+        {
+            ret = nbt_node_write_nbt(buffer, child, 0);
+            if (ret) return ret;
+            child = child->next;
+        }
+    return 0;
+}
+
 int LIBNBT_nbt_write_list(NBT_Buffer* buffer, NBT* root) {
     int ret;
     NBT* child = root->child;
@@ -1491,9 +1580,6 @@ int LIBNBT_nbt_write_list(NBT_Buffer* buffer, NBT* root) {
         ret = LIBNBT_writeUint8(buffer, child->type);
     }
     ret = LIBNBT_writeUint32(buffer, count);
-    if (!ret) {
-        return LIBNBT_ERROR_BUFFER_OVERFLOW;
-    }
     if (!ret) {
         return LIBNBT_ERROR_BUFFER_OVERFLOW;
     }
@@ -1596,6 +1682,49 @@ int NBT_Pack_Opt(NBT* root, uint8_t* buffer, size_t* length, NBT_Compression com
 
 int NBT_Pack(NBT* root, uint8_t* buffer, size_t* length) {
     return NBT_Pack_Opt(root, buffer, length, NBT_Compression_GZIP, NULL);
+}
+
+int nbt_node_pack(NbtNode* node, uint8_t* buffer, size_t* length)
+{
+    return nbt_node_pack_opt (node, buffer, length, NBT_Compression_GZIP, NULL);
+}
+
+int nbt_node_pack_opt(NbtNode* node, uint8_t* buffer, size_t* length, NBT_Compression compression, NBT_Error* errid)
+{
+    NBT_Buffer *buf;
+    if (compression == NBT_Compression_NONE) {
+            buf = LIBNBT_init_buffer(buffer, *length);
+    } else {
+            size_t len = *length > (1 << 20) ? *length : (1 << 20);
+            uint8_t* tempbuf = malloc(len);
+            buf = LIBNBT_init_buffer(tempbuf, len);
+    }
+    int ret;
+    ret = nbt_node_write_nbt(buf, node, 1);
+    LIBNBT_fill_err(errid, ret, buf->pos);
+
+    if (compression == NBT_Compression_NONE) {
+            *length = buf->pos;
+            free(buf);
+            return ret;
+    } else {
+            if (ret != 0) {
+                    free(buf->data);
+                    free(buf);
+                    return ret;
+            }
+            if (compression == NBT_Compression_GZIP) {
+                    ret = LIBNBT_compress_gzip(buffer, length, buf->data, buf->pos);
+                    free(buf->data);
+                    free(buf);
+                    return ret;
+            } else {
+                    ret = LIBNBT_compress_zlib(buffer, length, buf->data, buf->pos);
+                    free(buf->data);
+                    free(buf);
+                    return ret;
+            }
+    }
 }
 
 MCA* MCA_Init(const char* filename) {
