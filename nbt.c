@@ -373,7 +373,7 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey)
     NBT_Tags tag = data->type;
     if (tag == TAG_End)
         {
-            if (!LIBNBT_getUint8 (buffer, &tag))
+            if (!LIBNBT_getUint8 (buffer, (uint8_t*)&tag))
                 return LIBNBT_ERROR_EARLY_EOF;
             if (!isValidTag (tag))
                 return LIBNBT_ERROR_INVALID_DATA;
