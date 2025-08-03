@@ -1624,7 +1624,7 @@ static void
 nbt_data_free (NbtNode *node)
 {
     NbtData *data = node->data;
-    if (!data->key)
+    if (data->key)
         free (data->key);
     switch (data->type)
         {
