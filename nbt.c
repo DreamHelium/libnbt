@@ -16,6 +16,7 @@
 
 #include "nbt.h"
 
+#include <gio/gcancellable.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -108,7 +109,8 @@ typedef struct NBT_Buffer
 #endif
 
 NBT *LIBNBT_create_NBT (uint8_t type);
-NBT_Buffer *LIBNBT_init_buffer (uint8_t *data, int length);
+static NBT_Buffer *init_buffer (uint8_t *data, int length);
+static uint8_t *dup_data (uint8_t *src, size_t len);
 int LIBNBT_getUint8 (NBT_Buffer *buffer, uint8_t *result);
 int LIBNBT_getUint16 (NBT_Buffer *buffer, uint16_t *result);
 int LIBNBT_getUint32 (NBT_Buffer *buffer, uint32_t *result);
@@ -174,18 +176,26 @@ create_nbt (NBT_Tags tag)
     return root;
 }
 
-NBT_Buffer *
-LIBNBT_init_buffer (uint8_t *data, int length)
+static NBT_Buffer *
+init_buffer (uint8_t *data, int length)
 {
     NBT_Buffer *buffer = malloc (sizeof (NBT_Buffer));
     if (buffer == NULL)
-        {
-            return NULL;
-        }
+        return NULL;
     buffer->data = data;
     buffer->len = length;
     buffer->pos = 0;
     return buffer;
+}
+
+static uint8_t *
+dup_data (uint8_t *src, size_t len)
+{
+    uint8_t *dst = malloc (len);
+    if (dst == NULL)
+        return NULL;
+    memcpy (dst, src, len);
+    return dst;
 }
 
 int
@@ -364,16 +374,24 @@ LIBNBT_getKey (NBT_Buffer *buffer, char **result)
 }
 
 static int
-parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey)
+parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey,
+             DhProgressSet set_func, void *main_klass,
+             GCancellable *cancellable, int min, int max)
 {
     if (!node || !buffer || !buffer->data)
         return LIBNBT_ERROR_INTERNAL;
+    if (g_cancellable_is_cancelled (cancellable))
+        return LIBNBT_ERROR_EARLY_EOF;
+
+    if (set_func && main_klass)
+        set_func (main_klass,
+                  min + buffer->pos * (max - min) / buffer->len);
 
     NbtData *data = node->data;
     NBT_Tags tag = data->type;
     if (tag == TAG_End)
         {
-            if (!LIBNBT_getUint8 (buffer, (uint8_t*)&tag))
+            if (!LIBNBT_getUint8 (buffer, (uint8_t *)&tag))
                 return LIBNBT_ERROR_EARLY_EOF;
             if (!isValidTag (tag))
                 return LIBNBT_ERROR_INVALID_DATA;
@@ -481,7 +499,9 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey)
                 for (int i = 0; i < len; i++)
                     {
                         NbtNode *child = create_nbt (list_type);
-                        int ret = parse_value (child, buffer, 1);
+                        int ret
+                            = parse_value (child, buffer, 1, set_func,
+                                           main_klass, cancellable, min, max);
                         if (ret)
                             return ret;
                         last = g_node_insert_after (node, last, child);
@@ -499,7 +519,9 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey)
                         if (list_type == 0)
                             break;
                         NbtNode *child = create_nbt (list_type);
-                        int ret = parse_value (child, buffer, 0);
+                        int ret
+                            = parse_value (child, buffer, 0, set_func,
+                                           main_klass, cancellable, min, max);
                         if (ret)
                             return ret;
                         last = g_node_insert_after (node, last, child);
@@ -1147,9 +1169,7 @@ void
 LIBNBT_fill_err (NBT_Error *err, int errid, int position)
 {
     if (err == NULL)
-        {
-            return;
-        }
+        return;
     err->errid = errid;
     err->position = position;
 }
@@ -1420,7 +1440,7 @@ int
 NBT_toSNBT_Opt (NBT *root, char *buff, size_t *bufflen, int maxlevel,
                 int space, NBT_Error *errid)
 {
-    NBT_Buffer *buffer = LIBNBT_init_buffer ((uint8_t *)buff, *bufflen);
+    NBT_Buffer *buffer = init_buffer ((uint8_t *)buff, *bufflen);
     int ret;
     ret = LIBNBT_snbt_write_nbt (buffer, root, maxlevel, space, 0);
     LIBNBT_fill_err (errid, ret, buffer->pos);
@@ -1491,7 +1511,7 @@ NBT_Parse_Opt (uint8_t *data, size_t length, NBT_Error *errid)
                     LIBNBT_fill_err (errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
                     return NULL;
                 }
-            buffer = LIBNBT_init_buffer (undata, size);
+            buffer = init_buffer (undata, size);
         }
     else if (data[0] == 0x78)
         {
@@ -1504,11 +1524,11 @@ NBT_Parse_Opt (uint8_t *data, size_t length, NBT_Error *errid)
                     LIBNBT_fill_err (errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
                     return NULL;
                 }
-            buffer = LIBNBT_init_buffer (undata, size);
+            buffer = init_buffer (undata, size);
         }
     else
         {
-            buffer = LIBNBT_init_buffer (data, length);
+            buffer = init_buffer (data, length);
         }
 
     NBT *root = LIBNBT_create_NBT (TAG_End);
@@ -1542,7 +1562,9 @@ NBT_Parse_Opt (uint8_t *data, size_t length, NBT_Error *errid)
 }
 
 NbtNode *
-nbt_node_new_opt (uint8_t *data, size_t length, NBT_Error *errid)
+nbt_node_new_opt (uint8_t *data, size_t length, NBT_Error *errid,
+                  DhProgressSet set_func, void *klass,
+                  GCancellable *cancellable, int min, int max)
 {
     NBT_Buffer *buffer;
 
@@ -1558,7 +1580,7 @@ nbt_node_new_opt (uint8_t *data, size_t length, NBT_Error *errid)
                     LIBNBT_fill_err (errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
                     return NULL;
                 }
-            buffer = LIBNBT_init_buffer (undata, size);
+            buffer = init_buffer (undata, size);
         }
     else if (data[0] == 0x78)
         {
@@ -1571,19 +1593,29 @@ nbt_node_new_opt (uint8_t *data, size_t length, NBT_Error *errid)
                     LIBNBT_fill_err (errid, LIBNBT_ERROR_UNZIP_ERROR, 0);
                     return NULL;
                 }
-            buffer = LIBNBT_init_buffer (undata, size);
+            buffer = init_buffer (undata, size);
         }
     else
         {
-            buffer = LIBNBT_init_buffer (data, length);
+            uint8_t *dup_data_p = dup_data (data, length);
+            buffer = init_buffer (dup_data_p, length);
+        }
+
+    /* Cancelled */
+    if (g_cancellable_is_cancelled (cancellable))
+        {
+            free (buffer->data);
+            free (buffer);
+            return NULL;
         }
 
     NbtNode *root = create_nbt (TAG_End);
-    int ret = parse_value (root, buffer, 0);
-    if (buffer->data != data)
-        {
-            free (buffer->data);
-        }
+    int ret = parse_value (root, buffer, 0, set_func, klass, cancellable, min,
+                           max);
+    free (buffer->data);
+
+    if (set_func && klass)
+        set_func (klass, max);
 
     if (ret != 0)
         {
@@ -1615,9 +1647,18 @@ NBT_Parse (uint8_t *data, size_t length)
 }
 
 NbtNode *
+nbt_node_new_with_progress (uint8_t *data, size_t length,
+                            DhProgressSet set_func, void *main_klass,
+                            GCancellable *cancellable, int min, int max)
+{
+    return nbt_node_new_opt (data, length, NULL, set_func, main_klass,
+                             cancellable, min, max);
+}
+
+NbtNode *
 nbt_node_new (uint8_t *data, size_t length)
 {
-    return nbt_node_new_opt (data, length, NULL);
+    return nbt_node_new_opt (data, length, NULL, NULL, NULL, NULL, 0, 0);
 }
 
 static void
@@ -2108,13 +2149,13 @@ NBT_Pack_Opt (NBT *root, uint8_t *buffer, size_t *length,
     NBT_Buffer *buf;
     if (compression == NBT_Compression_NONE)
         {
-            buf = LIBNBT_init_buffer (buffer, *length);
+            buf = init_buffer (buffer, *length);
         }
     else
         {
             size_t len = *length > (1 << 20) ? *length : (1 << 20);
             uint8_t *tempbuf = malloc (len);
-            buf = LIBNBT_init_buffer (tempbuf, len);
+            buf = init_buffer (tempbuf, len);
         }
     int ret;
     ret = LIBNBT_nbt_write_nbt (buf, root, 1);
@@ -2173,13 +2214,13 @@ nbt_node_pack_opt (NbtNode *node, uint8_t *buffer, size_t *length,
     NBT_Buffer *buf;
     if (compression == NBT_Compression_NONE)
         {
-            buf = LIBNBT_init_buffer (buffer, *length);
+            buf = init_buffer (buffer, *length);
         }
     else
         {
             size_t len = *length > (1 << 20) ? *length : (1 << 20);
             uint8_t *tempbuf = malloc (len);
-            buf = LIBNBT_init_buffer (tempbuf, len);
+            buf = init_buffer (tempbuf, len);
         }
     int ret;
     ret = nbt_node_write_nbt (buf, node, 1);
@@ -2399,7 +2440,7 @@ MCA_ReadRaw (uint8_t *data, size_t length, MCA *mca, int skip_chunk_error)
     uint64_t offsets[CHUNKS_IN_REGION];
 
     int j;
-    NBT_Buffer *buffer = LIBNBT_init_buffer (data, length);
+    NBT_Buffer *buffer = init_buffer (data, length);
     for (j = 0; j < CHUNKS_IN_REGION; j++)
         {
             uint32_t temp = 0;

@@ -1,16 +1,16 @@
 /*  libnbt - Minecraft NBT/MCA/SNBT file parser in C
     Copyright (C) 2020 djytw
-    
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
-    
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU Lesser General Public License for more details.
-    
+
     You should have received a copy of the GNU Lesser General Public License
     along with this program.  If not, see <https://www.gnu.org/licenses/>. */
 
@@ -18,6 +18,7 @@
 #ifndef NBT_H
 #define NBT_H
 #include <glib.h>
+#include <gio/gio.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -134,8 +135,12 @@ typedef struct NBT_Error {
     int position;
 } NBT_Error;
 
+typedef void (*DhProgressSet)(void*, int);
+
+NbtNode* nbt_node_new_with_progress(uint8_t* data, size_t length, DhProgressSet set_func, void* main_klass, GCancellable* cancellable, int min, int max);
 NbtNode* nbt_node_new(uint8_t* data, size_t length);
-NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* err);
+NbtNode* nbt_node_new_opt(uint8_t* data, size_t length, NBT_Error* err,
+                      DhProgressSet set_func, void *klass, GCancellable* cancellable, int min, int max);
 void nbt_node_free(NbtNode* node);
 int nbt_node_pack(NbtNode* node, uint8_t* buffer, size_t* length);
 int nbt_node_pack_opt(NbtNode* node, uint8_t* buffer, size_t* length, NBT_Compression compression, NBT_Error* err);
