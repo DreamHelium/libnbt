@@ -384,8 +384,7 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey,
         return LIBNBT_ERROR_EARLY_EOF;
 
     if (set_func && main_klass)
-        set_func (main_klass,
-                  min + buffer->pos * (max - min) / buffer->len);
+        set_func (main_klass, min + buffer->pos * (max - min) / buffer->len);
 
     NbtData *data = node->data;
     NBT_Tags tag = data->type;
@@ -503,7 +502,11 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey,
                             = parse_value (child, buffer, 1, set_func,
                                            main_klass, cancellable, min, max);
                         if (ret)
-                            return ret;
+                            {
+                                nbt_node_free (child);
+                                return ret;
+                            }
+
                         last = g_node_insert_after (node, last, child);
                     }
                 break;
@@ -523,7 +526,10 @@ parse_value (NbtNode *node, NBT_Buffer *buffer, uint8_t skipkey,
                             = parse_value (child, buffer, 0, set_func,
                                            main_klass, cancellable, min, max);
                         if (ret)
-                            return ret;
+                            {
+                                nbt_node_free (child);
+                                return ret;
+                            }
                         last = g_node_insert_after (node, last, child);
                     }
                 break;
